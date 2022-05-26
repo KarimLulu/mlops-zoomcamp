@@ -3,3 +3,8 @@ data/
 .bin
 .idea/
 .DS_Store
+
+# MLFlow artifacts
+mlruns/
+models/
+preprocessor/
