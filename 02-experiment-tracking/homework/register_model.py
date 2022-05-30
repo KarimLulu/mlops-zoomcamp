@@ -31,7 +31,7 @@ def load_pickle(filename):
         return pickle.load(f_in)
 
 
-def train_and_log_model(data_path, params):
+def train_and_log_model(data_path, params, test_metric="test_rmse"):
     X_train, y_train = load_pickle(os.path.join(data_path, "train.pkl"))
     X_valid, y_valid = load_pickle(os.path.join(data_path, "valid.pkl"))
     X_test, y_test = load_pickle(os.path.join(data_path, "test.pkl"))
@@ -45,7 +45,7 @@ def train_and_log_model(data_path, params):
         valid_rmse = mean_squared_error(y_valid, rf.predict(X_valid), squared=False)
         mlflow.log_metric("valid_rmse", valid_rmse)
         test_rmse = mean_squared_error(y_test, rf.predict(X_test), squared=False)
-        mlflow.log_metric("test_rmse", test_rmse)
+        mlflow.log_metric(test_metric, test_rmse)
 
 
 def run(data_path, log_top):
@@ -60,16 +60,17 @@ def run(data_path, log_top):
         max_results=log_top,
         order_by=["metrics.rmse ASC"]
     )
+    test_metric = "test_rmse"
     for run in runs:
-        train_and_log_model(data_path=data_path, params=run.data.params)
+        train_and_log_model(data_path=data_path, params=run.data.params, test_metric=test_metric)
 
     # select the model with the lowest test RMSE
     experiment = client.get_experiment_by_name(EXPERIMENT_NAME)
     best_run = client.search_runs(
         experiment_ids=experiment.experiment_id,
-        order_by=["metrics.test_rmse ASC"],
+        order_by=[f"metrics.{test_metric} ASC"],
         max_results=1)[0]
-    print("Best test RMSE:", best_run.data.metrics['test_rmse'])
+    print("Best test RMSE:", best_run.data.metrics[test_metric])
     # register the best model
     model_uri = f"runs:/{best_run.info.run_id}/model"
     name = "gree-taxi-duration-predictor"
