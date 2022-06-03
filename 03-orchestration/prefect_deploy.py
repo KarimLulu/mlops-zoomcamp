@@ -12,14 +12,16 @@ from hyperopt.pyll import scope
 import mlflow
 
 from prefect import flow, task
+from prefect.task_runners import SequentialTaskRunner
+from prefect.deployments import DeploymentSpec
+from prefect.orion.schemas.schedules import IntervalSchedule
+from prefect.flow_runners import SubprocessFlowRunner
+from datetime import timedelta
+
 
 @task
 def read_dataframe(filename):
     df = pd.read_parquet(filename)
-
-    df.lpep_dropoff_datetime = pd.to_datetime(df.lpep_dropoff_datetime)
-    df.lpep_pickup_datetime = pd.to_datetime(df.lpep_pickup_datetime)
-
     df['duration'] = df.lpep_dropoff_datetime - df.lpep_pickup_datetime
     df.duration = df.duration.apply(lambda td: td.total_seconds() / 60)
 
@@ -27,21 +29,16 @@ def read_dataframe(filename):
 
     categorical = ['PULocationID', 'DOLocationID']
     df[categorical] = df[categorical].astype(str)
-    
+
     return df
+
 
 @task
 def add_features(df_train, df_val):
-    # df_train = read_dataframe(train_path)
-    # df_val = read_dataframe(val_path)
-
-    print(len(df_train))
-    print(len(df_val))
-
     df_train['PU_DO'] = df_train['PULocationID'] + '_' + df_train['DOLocationID']
     df_val['PU_DO'] = df_val['PULocationID'] + '_' + df_val['DOLocationID']
 
-    categorical = ['PU_DO'] #'PULocationID', 'DOLocationID']
+    categorical = ['PU_DO']
     numerical = ['trip_distance']
 
     dv = DictVectorizer()
@@ -58,6 +55,7 @@ def add_features(df_train, df_val):
 
     return X_train, X_val, y_train, y_val, dv
 
+
 @task
 def train_model_search(train, valid, y_val):
     def objective(params):
@@ -67,7 +65,7 @@ def train_model_search(train, valid, y_val):
             booster = xgb.train(
                 params=params,
                 dtrain=train,
-                num_boost_round=100,
+                num_boost_round=1,
                 evals=[(valid, 'validation')],
                 early_stopping_rounds=50
             )
@@ -87,19 +85,18 @@ def train_model_search(train, valid, y_val):
         'seed': 42
     }
 
-    best_result = fmin(
+    _ = fmin(
         fn=objective,
         space=search_space,
         algo=tpe.suggest,
         max_evals=1,
         trials=Trials()
     )
-    return
+
 
 @task
 def train_best_model(train, valid, y_val, dv):
     with mlflow.start_run():
-
         best_params = {
             'learning_rate': 0.09585355369315604,
             'max_depth': 30,
@@ -115,7 +112,7 @@ def train_best_model(train, valid, y_val, dv):
         booster = xgb.train(
             params=best_params,
             dtrain=train,
-            num_boost_round=100,
+            num_boost_round=1,
             evals=[(valid, 'validation')],
             early_stopping_rounds=50
         )
@@ -130,9 +127,10 @@ def train_best_model(train, valid, y_val, dv):
 
         mlflow.xgboost.log_model(booster, artifact_path="models_mlflow")
 
-@flow
-def main(train_path: str="./data/green_tripdata_2021-01.parquet",
-        val_path: str="./data/green_tripdata_2021-02.parquet"):
+
+@flow(task_runner=SequentialTaskRunner())
+def main(train_path: str = "./data/green_tripdata_2021-01.parquet",
+         val_path: str = "./data/green_tripdata_2021-02.parquet"):
     mlflow.set_tracking_uri("sqlite:///mlflow.db")
     mlflow.set_experiment("nyc-taxi-experiment")
     X_train = read_dataframe(train_path)
@@ -143,16 +141,11 @@ def main(train_path: str="./data/green_tripdata_2021-01.parquet",
     train_model_search(train, valid, y_val)
     train_best_model(train, valid, y_val, dv)
 
-from prefect.deployments import Deployment
-from prefect.orion.schemas.schedules import IntervalSchedule
-from datetime import timedelta
 
-deployment = Deployment.build_from_flow(
+DeploymentSpec(
     flow=main,
     name="model_training",
     schedule=IntervalSchedule(interval=timedelta(minutes=5)),
-    work_queue_name="ml"
+    flow_runner=SubprocessFlowRunner(),
+    tags=["ml", "duration-prediction"]
 )
-
-deployment.apply()
-

@@ -12,51 +12,42 @@ from hyperopt.pyll import scope
 import mlflow
 
 from prefect import flow, task
+from prefect.task_runners import SequentialTaskRunner
+
 
 @task
-def read_dataframe(filename):
+def read_dataframe(filename: str):
     df = pd.read_parquet(filename)
-
-    df.lpep_dropoff_datetime = pd.to_datetime(df.lpep_dropoff_datetime)
-    df.lpep_pickup_datetime = pd.to_datetime(df.lpep_pickup_datetime)
-
     df['duration'] = df.lpep_dropoff_datetime - df.lpep_pickup_datetime
     df.duration = df.duration.apply(lambda td: td.total_seconds() / 60)
-
     df = df[(df.duration >= 1) & (df.duration <= 60)]
-
     categorical = ['PULocationID', 'DOLocationID']
     df[categorical] = df[categorical].astype(str)
-    
     return df
+
 
 @task
 def add_features(df_train, df_val):
-    # df_train = read_dataframe(train_path)
-    # df_val = read_dataframe(val_path)
-
-    print(len(df_train))
-    print(len(df_val))
-
     df_train['PU_DO'] = df_train['PULocationID'] + '_' + df_train['DOLocationID']
     df_val['PU_DO'] = df_val['PULocationID'] + '_' + df_val['DOLocationID']
 
-    categorical = ['PU_DO'] #'PULocationID', 'DOLocationID']
+    categorical = ['PU_DO']
     numerical = ['trip_distance']
 
-    dv = DictVectorizer()
+    vectorizer = DictVectorizer()
 
     train_dicts = df_train[categorical + numerical].to_dict(orient='records')
-    X_train = dv.fit_transform(train_dicts)
+    X_train = vectorizer.fit_transform(train_dicts)
 
     val_dicts = df_val[categorical + numerical].to_dict(orient='records')
-    X_val = dv.transform(val_dicts)
+    X_val = vectorizer.transform(val_dicts)
 
     target = 'duration'
     y_train = df_train[target].values
     y_val = df_val[target].values
 
-    return X_train, X_val, y_train, y_val, dv
+    return X_train, X_val, y_train, y_val, vectorizer
+
 
 @task
 def train_model_search(train, valid, y_val):
@@ -67,7 +58,7 @@ def train_model_search(train, valid, y_val):
             booster = xgb.train(
                 params=params,
                 dtrain=train,
-                num_boost_round=100,
+                num_boost_round=1,
                 evals=[(valid, 'validation')],
                 early_stopping_rounds=50
             )
@@ -87,14 +78,15 @@ def train_model_search(train, valid, y_val):
         'seed': 42
     }
 
-    best_result = fmin(
+    _ = fmin(
         fn=objective,
         space=search_space,
         algo=tpe.suggest,
         max_evals=1,
         trials=Trials()
     )
-    return
+
+
 
 @task
 def train_best_model(train, valid, y_val, dv):
@@ -115,7 +107,7 @@ def train_best_model(train, valid, y_val, dv):
         booster = xgb.train(
             params=best_params,
             dtrain=train,
-            num_boost_round=100,
+            num_boost_round=1,
             evals=[(valid, 'validation')],
             early_stopping_rounds=50
         )
@@ -130,15 +122,24 @@ def train_best_model(train, valid, y_val, dv):
 
         mlflow.xgboost.log_model(booster, artifact_path="models_mlflow")
 
-@flow
-def main(train_path: str="./data/green_tripdata_2021-01.parquet",
-        val_path: str="./data/green_tripdata_2021-02.parquet"):
+
+# MLFlow fails on concurrent inserts
+@flow(task_runner=SequentialTaskRunner())
+# can check parameters and fail on a type mismatch!
+def main(
+        train_path: str = "./data/green_tripdata_2021-01.parquet",
+        val_path: str = "./data/green_tripdata_2021-02.parquet"
+):
     mlflow.set_tracking_uri("sqlite:///mlflow.db")
     mlflow.set_experiment("nyc-taxi-experiment")
     X_train = read_dataframe(train_path)
     X_val = read_dataframe(val_path)
+    # add_features() is a Future, need to retrieve the result
     X_train, X_val, y_train, y_val, dv = add_features(X_train, X_val).result()
     train = xgb.DMatrix(X_train, label=y_train)
     valid = xgb.DMatrix(X_val, label=y_val)
     train_model_search(train, valid, y_val)
     train_best_model(train, valid, y_val, dv)
+
+
+main()

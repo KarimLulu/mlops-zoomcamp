@@ -2,7 +2,6 @@ import pandas as pd
 import pickle
 
 from sklearn.feature_extraction import DictVectorizer
-from sklearn.linear_model import LinearRegression, Lasso, Ridge
 from sklearn.metrics import mean_squared_error
 
 import mlflow
@@ -13,14 +12,15 @@ from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
 from hyperopt.pyll import scope
 
 from prefect import flow, task
+from prefect.deployments import DeploymentSpec
+from prefect.orion.schemas.schedules import IntervalSchedule
+from prefect.flow_runners import SubprocessFlowRunner
+from datetime import timedelta
+
 
 @task
 def read_dataframe(filename):
     df = pd.read_parquet(filename)
-
-    df.lpep_dropoff_datetime = pd.to_datetime(df.lpep_dropoff_datetime)
-    df.lpep_pickup_datetime = pd.to_datetime(df.lpep_pickup_datetime)
-
     df['duration'] = df.lpep_dropoff_datetime - df.lpep_pickup_datetime
     df.duration = df.duration.apply(lambda td: td.total_seconds() / 60)
 
@@ -31,12 +31,13 @@ def read_dataframe(filename):
 
     return df
 
+
 @task
 def add_features(df_train, df_val):
     df_train['PU_DO'] = df_train['PULocationID'] + '_' + df_train['DOLocationID']
     df_val['PU_DO'] = df_val['PULocationID'] + '_' + df_val['DOLocationID']
 
-    categorical = ['PU_DO'] #'PULocationID', 'DOLocationID']
+    categorical = ['PU_DO']
     numerical = ['trip_distance']
 
     dv = DictVectorizer()
@@ -46,7 +47,6 @@ def add_features(df_train, df_val):
 
     val_dicts = df_val[categorical + numerical].to_dict(orient='records')
     X_val = dv.transform(val_dicts)
-
 
     target = 'duration'
     y_train = df_train[target].values
@@ -92,10 +92,10 @@ def train_model_search(train, valid, y_val):
     )
     return best_result
 
+
 @task
 def train_best_model(X_train, X_val, y_train, y_val, dv):
     with mlflow.start_run():
-        
         train = xgb.DMatrix(X_train, label=y_train)
         valid = xgb.DMatrix(X_val, label=y_val)
 
@@ -129,9 +129,10 @@ def train_best_model(X_train, X_val, y_train, y_val, dv):
 
         mlflow.xgboost.log_model(booster, artifact_path="models_mlflow")
 
+
 @flow
-def main_flow(train_path: str = './data/green_tripdata_2021-01.parquet', 
-                val_path: str = './data/green_tripdata_2021-02.parquet'):
+def main_flow(train_path: str = './data/green_tripdata_2021-01.parquet',
+              val_path: str = './data/green_tripdata_2021-02.parquet'):
     mlflow.set_tracking_uri("sqlite:///mlflow.db")
     mlflow.set_experiment("nyc-taxi-experiment")
     # Load
@@ -147,15 +148,11 @@ def main_flow(train_path: str = './data/green_tripdata_2021-01.parquet',
     best = train_model_search(train, valid, y_val)
     train_best_model(X_train, X_val, y_train, y_val, dv, wait_for=best)
 
-# main_flow()
 
-from prefect.deployments import Deployment
-from prefect.orion.schemas.schedules import IntervalSchedule
-from datetime import timedelta
-
-Deployment.build_from_flow(
+DeploymentSpec(
     flow=main_flow,
     name="model_training",
-    # schedule=IntervalSchedule(interval=timedelta(weeks=1)),
-    work_queue_name="ml",
+    schedule=IntervalSchedule(interval=timedelta(weeks=1)),
+    flow_runner=SubprocessFlowRunner(),
+    tags=["ml"],
 )
