@@ -14,9 +14,7 @@ import mlflow
 from prefect import flow, task
 from prefect.task_runners import SequentialTaskRunner
 from prefect.deployments import DeploymentSpec
-from prefect.orion.schemas.schedules import IntervalSchedule
-from prefect.flow_runners import SubprocessFlowRunner
-from datetime import timedelta
+from prefect.flow_runners import DockerFlowRunner
 
 
 @task
@@ -144,8 +142,7 @@ def main(train_path: str = "./data/green_tripdata_2021-01.parquet",
 
 DeploymentSpec(
     flow=main,
-    name="model_training",
-    schedule=IntervalSchedule(interval=timedelta(minutes=5)),
-    flow_runner=SubprocessFlowRunner(),
+    name="model_training_docker_s3",
+    flow_runner=DockerFlowRunner(image="prefect-docker:v1.0.0"),
     tags=["ml", "duration-prediction"]
 )
