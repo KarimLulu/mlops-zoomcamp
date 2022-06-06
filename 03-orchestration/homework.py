@@ -103,7 +103,7 @@ def serialize_model(date, model, vectorizer):
 
 
 @flow(task_runner=SequentialTaskRunner())
-def main(date='2021-08-15'):
+def main(date=None):
     date = get_date(date)
     train_path, val_path = get_paths(date).result()
     categorical = ['PUlocationID', 'DOlocationID']
