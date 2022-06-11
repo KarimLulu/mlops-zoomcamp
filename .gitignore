@@ -9,3 +9,14 @@ mlruns/
 models/
 preprocessor/
 artifacts/
+*.db
+
+*.parquet
+*.html
+*.csv
+
+.venv
+venv
+.idea
+
+__pycache__/
