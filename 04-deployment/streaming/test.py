@@ -1,5 +1,5 @@
-
 import lambda_function
+
 
 event = {
     "Records": [
