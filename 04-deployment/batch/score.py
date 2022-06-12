@@ -2,12 +2,17 @@
 # coding: utf-8
 
 import argparse
+from io import BytesIO
 import logging
-from pathlib import Path
 import uuid
 
+import boto3
 import mlflow
 import pandas as pd
+
+
+BUCKET_NAME = 'mlflow-artifacts-remote-3'
+MODEL_PATH = 's3://mlflow-artifacts-remote-3/2/{run_id}/artifacts/model'
 
 
 logging.basicConfig(
@@ -17,11 +22,7 @@ logging.basicConfig(
     style="{"
 )
 logger = logging.getLogger(__name__)
-
-
-MODEL_PATH = 's3://mlflow-artifacts-remote-3/2/{run_id}/artifacts/model'
-OUTPUT_FOLDER = Path(__name__).parent.resolve() / 'output'
-OUTPUT_FOLDER.mkdir(exist_ok=True)
+s3_client = boto3.client('s3')
 
 
 def read_dataframe(filename: str):
@@ -49,18 +50,32 @@ def load_model(run_id):
     return model
 
 
-def apply_model(input_file, run_id, output_file):
-    logger.info(f'reading the data from {input_file}...')
+def prepare_s3_key(taxi_type, year, month):
+    key = f"output/{taxi_type}/{year:04d}-{month:02d}.parquet"
+    return key
+
+
+def save_predictions(df: pd.DataFrame, output_key: str):
+    out_buffer = BytesIO()
+    df.to_parquet(out_buffer, index=False)
+    s3_client.put_object(
+        Body=out_buffer.getvalue(),
+        Bucket=BUCKET_NAME,
+        Key=output_key
+    )
+
+
+def apply_model(input_file, run_id, output_key):
+    logger.info(f'Reading the data from {input_file}')
     df = read_dataframe(input_file)
     dicts = prepare_dictionaries(df)
 
-    logger.info(f'loading the model with RUN_ID={run_id}...')
+    logger.info(f'Loading the model with RUN_ID={run_id}')
     model = load_model(run_id)
 
-    logger.info(f'applying the model...')
+    logger.info(f'Applying the model')
     y_pred = model.predict(dicts)
 
-    logger.info(f'saving the result to {output_file}...')
     df_result = pd.DataFrame()
     df_result['ride_id'] = df['ride_id']
     df_result['lpep_pickup_datetime'] = df['lpep_pickup_datetime']
@@ -71,13 +86,8 @@ def apply_model(input_file, run_id, output_file):
     df_result['diff'] = df_result['actual_duration'] - df_result['predicted_duration']
     df_result['model_version'] = run_id
 
-    df_result.to_parquet(output_file, index=False)
-
-
-def prepare_output_path(folder, taxi_type, year, month):
-    output_file = folder / taxi_type / f'{year:04d}-{month:02d}.parquet'
-    output_file.parent.mkdir(exist_ok=True)
-    return output_file
+    logger.info(f'Saving the result to S3 {repr(output_key)}')
+    save_predictions(df_result, output_key)
 
 
 def run():
@@ -90,12 +100,12 @@ def run():
     taxi_type, year, month = args.taxi_type, args.year, args.month
 
     input_file = f'https://s3.amazonaws.com/nyc-tlc/trip+data/{taxi_type}_tripdata_{year:04d}-{month:02d}.parquet'
-    output_file = prepare_output_path(OUTPUT_FOLDER, taxi_type, year, month)
+    output_key = prepare_s3_key(taxi_type, year, month)
 
     apply_model(
         input_file=input_file,
         run_id=args.run_id,
-        output_file=output_file
+        output_key=output_key
     )
 
 
