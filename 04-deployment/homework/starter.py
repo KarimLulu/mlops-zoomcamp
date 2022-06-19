@@ -2,14 +2,16 @@
 # coding: utf-8
 
 import argparse
+from io import BytesIO
 import logging
 import pickle
 
-
+import boto3
 import pandas as pd
 
 
 CATEGORICAL = ['PUlocationID', 'DOlocationID']
+BUCKET_NAME = 'mlflow-artifacts-remote-3'
 
 
 logging.basicConfig(
@@ -19,6 +21,12 @@ logging.basicConfig(
     style="{"
 )
 logger = logging.getLogger(__name__)
+s3_client = boto3.client('s3')
+
+
+def prepare_s3_key(year, month):
+    key = f'fhv_tripdata_{year:04d}_{month:02d}_predictions.parquet'
+    return key
 
 
 def load_model(path: str = 'model.bin'):
@@ -38,7 +46,17 @@ def read_data(filename, categorical: list = None):
     return df
 
 
-def apply_model(input_file, output_file, date_part_ride_id: str, categorical: list = None):
+def save_predictions(df: pd.DataFrame, output_key: str):
+    out_buffer = BytesIO()
+    df.to_parquet(out_buffer, index=False)
+    s3_client.put_object(
+        Body=out_buffer.getvalue(),
+        Bucket=BUCKET_NAME,
+        Key=output_key
+    )
+
+
+def apply_model(input_file, output_key, date_part_ride_id: str, categorical: list = None):
     if categorical is None:
         categorical = CATEGORICAL
     dv, lr = load_model()
@@ -52,13 +70,8 @@ def apply_model(input_file, output_file, date_part_ride_id: str, categorical: li
     logger.info(f"Mean predicted duration {y_pred.mean():.3f}")
     df['ride_id'] = date_part_ride_id + df.index.astype('str')
     df_result = pd.DataFrame({'ride_id': df['ride_id'], 'predicted_duration': y_pred})
-    logger.info("Saving results")
-    df_result.to_parquet(
-        output_file,
-        engine='pyarrow',
-        compression=None,
-        index=False
-    )
+    logger.info(f'Saving the result to S3 {repr(output_key)}')
+    save_predictions(df_result, output_key)
 
 
 def run():
@@ -68,12 +81,12 @@ def run():
     args = parser.parse_args()
     year, month = args.year, args.month
     input_file = f'https://nyc-tlc.s3.amazonaws.com/trip+data/fhv_tripdata_{year:04d}-{month:02d}.parquet'
-    output_file = f'fhv_tripdata_{year:04d}_{month:02d}_predictions.parquet'
+    output_key = prepare_s3_key(year, month)
     date_part_ride_id = f'{year:04d}/{month:02d}_'
     logger.info(input_file)
     apply_model(
         input_file=input_file,
-        output_file=output_file,
+        output_key=output_key,
         date_part_ride_id=date_part_ride_id
     )
 
