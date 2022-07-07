@@ -89,4 +89,5 @@ def batch_analyze():
     save_report(result)
     save_html_report(result)
 
+
 batch_analyze()
