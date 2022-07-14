@@ -10,10 +10,10 @@ import pyarrow.parquet as pq
 from evidently import ColumnMapping
 
 from evidently.dashboard import Dashboard
-from evidently.dashboard.tabs import DataDriftTab,RegressionPerformanceTab
+from evidently.dashboard.tabs import DataDriftTab, RegressionPerformanceTab, NumTargetDriftTab, DataQualityTab
 
 from evidently.model_profile import Profile
-from evidently.model_profile.sections import DataDriftProfileSection, RegressionPerformanceProfileSection
+from evidently.model_profile.sections import DataDriftProfileSection, RegressionPerformanceProfileSection, NumTargetDriftProfileSection
 
 
 @task
@@ -58,13 +58,14 @@ def fetch_data():
 def run_evidently(ref_data, data):
     ref_data.drop('ehail_fee', axis=1, inplace=True)
     data.drop('ehail_fee', axis=1, inplace=True)  # drop empty column (until Evidently will work with it properly)
-    profile = Profile(sections=[DataDriftProfileSection(), RegressionPerformanceProfileSection()])
+    profile = Profile(sections=[DataDriftProfileSection(), RegressionPerformanceProfileSection(), NumTargetDriftProfileSection()])
     mapping = ColumnMapping(prediction="prediction", numerical_features=['trip_distance'],
                             categorical_features=['PULocationID', 'DOLocationID'],
                             datetime_features=[])
     profile.calculate(ref_data, data, mapping)
 
-    dashboard = Dashboard(tabs=[DataDriftTab(), RegressionPerformanceTab(verbose_level=0)])
+    dashboard = Dashboard(tabs=[DataDriftTab(), RegressionPerformanceTab(verbose_level=0),
+                                NumTargetDriftTab(), DataQualityTab()])
     dashboard.calculate(ref_data, data, mapping)
     return json.loads(profile.json()), dashboard
 
