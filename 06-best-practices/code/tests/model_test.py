@@ -27,7 +27,7 @@ def test_base64_decode():
 
 
 def test_prepare_features():
-    model_service = model.ModelService(None)
+    model_service = model.ModelService(model=None)
 
     ride = {
         "PULocationID": 130,
@@ -55,7 +55,8 @@ class ModelMock:
 
 
 def test_predict():
-    model_mock = ModelMock(10.0)
+    predicted_value = 10.0
+    model_mock = ModelMock(predicted_value)
     model_service = model.ModelService(model_mock)
 
     features = {
@@ -64,14 +65,15 @@ def test_predict():
     }
 
     actual_prediction = model_service.predict(features)
-    expected_prediction = 10.0
+    expected_prediction = predicted_value
 
     assert actual_prediction == expected_prediction
 
 
 def test_lambda_handler():
-    model_mock = ModelMock(10.0)
+    predicted_value = 10.0
     model_version = 'Test123'
+    model_mock = ModelMock(predicted_value)
     model_service = model.ModelService(model_mock, model_version)
 
     base64_input = read_text('data.b64')
@@ -93,7 +95,7 @@ def test_lambda_handler():
                 'model': 'ride_duration_prediction_model',
                 'version': model_version,
                 'prediction': {
-                    'ride_duration': 10.0,
+                    'ride_duration': predicted_value,
                     'ride_id': 256,
                 },
             }
