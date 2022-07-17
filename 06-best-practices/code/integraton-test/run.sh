@@ -13,6 +13,7 @@ else
     echo "no need to build image ${LOCAL_IMAGE_NAME}"
 fi
 
+export AWS_DEFAULT_REGION=eu-west-1
 export PREDICTIONS_STREAM_NAME="ride_predictions"
 
 docker-compose up -d
