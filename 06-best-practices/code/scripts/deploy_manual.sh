@@ -19,6 +19,7 @@ export RUN_ID=$(aws s3api list-objects-v2 --bucket ${MODEL_BUCKET_DEV} \
 aws s3 sync s3://${MODEL_BUCKET_DEV} s3://${MODEL_BUCKET_PROD}
 
 # Set new var RUN_ID in existing set of vars.
+# Will be done in CI/CD pipeline
 variables="{PREDICTIONS_STREAM_NAME=${PREDICTIONS_STREAM_NAME}, MODEL_BUCKET=${MODEL_BUCKET_PROD}, RUN_ID=${RUN_ID}}"
 
 # https://docs.aws.amazon.com/lambda/latest/dg/configuration-envvars.html
