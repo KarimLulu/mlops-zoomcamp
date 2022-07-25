@@ -1,0 +1,19 @@
+services:
+  backend:
+    image: ${LOCAL_IMAGE_NAME}
+    ports:
+      - "8080:8080"
+    environment:
+      - S3_ENDPOINT_URL=http://bucket:4566/
+      - INPUT_FILE_PATTERN=${INPUT_FILE_PATTERN}
+      - OUTPUT_FILE_PATTERN=${OUTPUT_FILE_PATTERN}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+      - AWS_ACCESS_KEY_ID=abc
+      - AWS_SECRET_ACCESS_KEY=xyz
+    command: --year=${YEAR} --month=${MONTH}
+  bucket:
+    image: localstack/localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3
