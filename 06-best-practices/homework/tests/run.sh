@@ -13,20 +13,32 @@ fi
 
 export AWS_DEFAULT_REGION=eu-west-2
 export YEAR=2021
-export MONTH=1
+export MONTH=01
+export S3_BUCKET_NAME=nyc-duration
 export S3_ENDPOINT_URL=http://localhost:4566
-export INPUT_FILE_PATTERN="s3://nyc-duration/in/${YEAR}-${MONTH}.parquet"
-export OUTPUT_FILE_PATTERN="s3://nyc-duration/out/${YEAR}-${MONTH}.parquet"
+export INPUT_FILE_PATTERN="s3://${S3_BUCKET_NAME}/in/${YEAR}-${MONTH}.parquet"
+export OUTPUT_FILE_PATTERN="s3://${S3_BUCKET_NAME}/out/${YEAR}-${MONTH}.parquet"
 
 docker-compose up bucket -d
 
 sleep 3
 
-aws --endpoint-url=${S3_ENDPOINT_URL} s3 mb s3://nyc-duration
+aws --endpoint-url=${S3_ENDPOINT_URL} s3 mb s3://${S3_BUCKET_NAME}
+
 pipenv run python upload_data.py
+
+aws --endpoint-url=${S3_ENDPOINT_URL} s3 ls ${S3_BUCKET_NAME}/in/
 
 docker-compose up backend
 
 pipenv run python integration_test.py
+
+ERROR_CODE=$?
+
+if [ ${ERROR_CODE} != 0 ]; then
+    docker-compose logs
+    docker-compose down
+    exit ${ERROR_CODE}
+fi
 
 docker-compose down
